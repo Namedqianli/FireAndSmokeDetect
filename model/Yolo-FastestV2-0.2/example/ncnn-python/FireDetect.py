@@ -8,9 +8,11 @@
 """
 
 from ast import Return
+from unicodedata import category
 import ncnn
 import cv2
 import numpy as np
+from objects import TargetBox
 
 class FireDetect:
     def __init__(self, param, model) -> None: 
@@ -18,6 +20,7 @@ class FireDetect:
         self.num_anchor = 3
         self.num_category = 1
         self.nms_thresh = 0.25
+        self.thresh = 0.3
         self.input_width = 320
         self.input_height = 320
         self.anchor = [20.36,31.76, 54.63,63.03, 82.37,123.16, 134.47,199.35, 177.87,96.39, 255.96,226.69]
@@ -31,8 +34,52 @@ class FireDetect:
         self.input_names = self.net.input_names()
         self.output_names = self.net.output_names()
 
-    def preHandle():
-        Return
+    def getCategory(self, values, index):
+        score = 0.0
+        objScore = values[4 * self.num_anchor + index]
+        category = 0
+
+        for i in range(self.num_category):
+            clsScore = values[4 * self.num_anchor + self.num_anchor + i]
+            clsScore *= objScore
+
+            if clsScore > score:
+                score = clsScore
+                category = i
+        
+        return score, category
+
+    def preHandle(self, ncnn_out, img_w, img_h, out_c, out_h, out_w):
+        scale_w = img_w / self.input_width
+        scale_h = img_h / self.input_height
+
+        objs = []
+        # output1
+        stride = self.input_height / out_h
+        out = np.array(ncnn_out)
+        print(out.shape)
+        out = out.reshape(out_c, out_h * out_w)
+        print(out.shape[1])
+        for i in range(out.shape[1]):
+            for j in range(self.num_anchor):
+                values = out[:,j]
+                s, c = self.getCategory(values, 0)
+                if s > self.thresh:
+                    h = i % out_h
+                    w = i // out_h
+                    bcx = ((values[j * 4 + 0] * 2.0 - 0.5) + w) * stride
+                    bcy = ((values[j * 4 + 1] * 2.0 - 0.5) + h) * stride
+                    bw = pow((values[j * 4 + 2] * 2.), 2) * self.anchor[(i * self.num_anchor * 2) + j * 2 + 0]
+                    bh = pow((values[j * 4 + 3] * 2.), 2) * self.anchor[(i * self.num_anchor * 2) + j * 2 + 1]
+                    tmpBox = TargetBox()
+                    tmpBox.x1 = (bcx - 0.5 * bw) * scale_w
+                    tmpBox.y1 = (bcy - 0.5 * bh) * scale_h
+                    tmpBox.x2 = (bcx + 0.5 * bw) * scale_w
+                    tmpBox.y2 = (bcy + 0.5 * bh) * scale_h
+                    tmpBox.score = s
+                    tmpBox.cate = c
+                    objs.append(tmpBox)
+        return objs
 
     def detect(self, img):
         img_h = img.shape[0]
@@ -56,6 +103,11 @@ class FireDetect:
 
         ret, out_mat1 = ex.extract(self.output_names[0])
         ret, out_mat2 = ex.extract(self.output_names[1])
+        
+        objs1 = self.preHandle(out_mat1, img_w, img_h, 18, 20, 20)
+        objs2 = self.preHandle(out_mat2, img_w, img_h, 18, 10, 10)
+        objs = objs1 + objs2
+        print('obj nums',len(objs1))
 
 # for test
 if __name__ == '__main__':
