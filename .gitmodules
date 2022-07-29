@@ -1,0 +1,3 @@
+[submodule "FastestDet"]
+	path = FastestDet
+	url = https://github.com/Namedqianli/FastestDet.git
